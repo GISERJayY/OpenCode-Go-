@@ -1,0 +1,14 @@
+{
+  "name": "opencodego-usage",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "puppeteer-core": "^25.3.0",
+    "yaml": "^2.5.0"
+  }
+}

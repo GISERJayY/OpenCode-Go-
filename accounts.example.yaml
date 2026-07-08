@@ -1,0 +1,9 @@
+# 用量查看配置。cookie 即登录 opencode.ai 后浏览器 DevTools → Application → Cookies 里 auth 那一行的 Value。
+# workspaceId 从浏览器地址栏 https://opencode.ai/workspace/<这段>/go 复制 wrk_xxx。
+accounts:
+  - name: 主号
+    cookie: "在此粘贴 auth cookie 的 Value"
+    workspaceId: wrk_xxxxxxxxxxxxxxxxxxxxxxxx
+  # - name: 备号1
+  #   cookie: "..."
+  #   workspaceId: wrk_yyyyyyyyyyyyyyyyyyyyyyyy

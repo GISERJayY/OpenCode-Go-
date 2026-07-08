@@ -1,0 +1,4 @@
+node_modules/
+accounts.yaml
+*.exe
+*.log
