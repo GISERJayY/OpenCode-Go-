@@ -28,7 +28,7 @@
 
 ## 安装
 
-在项目目录 `D:\yangjie\opencodego` 下：
+在项目目录下：
 
 ```bash
 bun install
@@ -181,9 +181,9 @@ OpenCode Go 用量看板已启动: http://localhost:8765/
 ```powershell
 # 后台启动，日志写到 usage-server.log
 Start-Process -WindowStyle Hidden -FilePath bun `
-  -ArgumentList "run","D:\yangjie\opencodego\src\index.ts","--serve","8765" `
-  -RedirectStandardOutput D:\yangjie\opencodego\usage-server.log `
-  -RedirectStandardError D:\yangjie\opencodego\usage-server.err.log
+  -ArgumentList "run","src\index.ts","--serve","8765" `
+  -RedirectStandardOutput usage-server.log `
+  -RedirectStandardError usage-server.err.log
 ```
 
 查看进程 / 停止：
