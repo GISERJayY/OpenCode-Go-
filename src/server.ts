@@ -1,7 +1,7 @@
 // 本地 Web 看板：HTTP 服务 + 内嵌前端页面
 import { createServer } from 'node:http';
 import type { Config } from './types.js';
-import { fetchAllReports } from './reporter.js';
+import { fetchAllReports, fetchKeyReport } from './reporter.js';
 
 const HTML = `<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
@@ -53,6 +53,19 @@ const HTML = `<!DOCTYPE html>
   .ren-btn { background: transparent; color: #58a6ffaa; border: none; cursor: pointer; font-size: 12px; margin-top: 8px; margin-right: 10px; }
   .ren-btn:hover { color: #58a6ff; }
   .acc-actions { margin-left: auto; }
+  .keys-toggle { background: transparent; color: #8b949e; border: 1px solid #30363d; padding: 2px 8px; border-radius: 6px; cursor: pointer; font-size: 11px; }
+  .keys-toggle:hover { color: #c9d1d9; border-color: #58a6ff; }
+  .keys-section { margin-top: 12px; border-top: 1px solid #21262d; padding-top: 10px; display: none; }
+  .keys-section.open { display: block; }
+  .keys-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .keys-table th { text-align: left; color: #8b949e; font-weight: 500; padding: 4px 8px; border-bottom: 1px solid #21262d; }
+  .keys-table td { padding: 5px 8px; border-bottom: 1px solid #0d1117; }
+  .keys-table code { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; font-size: 11px; color: #7ee787; background: #0d1117; padding: 1px 5px; border-radius: 3px; }
+  .keys-full { font-size: 10px; word-break: break-all; color: #f0883e; }
+  .keys-reveal { background: none; border: none; color: #58a6ff; cursor: pointer; font-size: 11px; padding: 0; }
+  .keys-reveal:hover { color: #79c0ff; text-decoration: underline; }
+  .keys-empty { color: #6e7681; font-size: 12px; padding: 8px 0; }
+  .keys-error { color: #f85149; font-size: 12px; }
 </style></head>
 <body>
 <header>
@@ -72,6 +85,7 @@ const HTML = `<!DOCTYPE html>
     monthly: { label: '每月', cap: 60 },
   };
   let cfg = { warn: 80, alert: 95 };
+  const keysCache = {};  // workspaceId → { loading: bool, data: KeyReport | null }
 
   function fmtCountdown(sec) {
     if (sec < 0 || !isFinite(sec)) return '--';
@@ -101,6 +115,7 @@ const HTML = `<!DOCTYPE html>
     if (!reports.length) { root.innerHTML = '<p>没有账号，点右上角「+ 添加账号」开始</p>'; return; }
     root.innerHTML = reports.map(r => {
       const actions = '<span class="acc-actions">'
+        + '<button class="keys-toggle" data-keys="'+escapeHtml(r.workspaceId)+'">🔑 密钥</button>'
         + '<button class="ren-btn" data-ren="'+escapeHtml(r.workspaceId)+'" data-name="'+escapeHtml(r.name)+'">改名</button>'
         + '<button class="del-btn" data-del="'+escapeHtml(r.workspaceId)+'">删除</button>'
         + '</span>';
@@ -118,7 +133,9 @@ const HTML = `<!DOCTYPE html>
         + renderTier('rolling', r.rolling)
         + renderTier('weekly', r.weekly)
         + renderTier('monthly', r.monthly)
-        + '</div></div>';
+        + '</div>'
+        + '<div class="keys-section" id="keys-'+escapeHtml(r.workspaceId)+'"></div>'
+        + '</div>';
     }).join('');
     // 绑定删除
     root.querySelectorAll('[data-del]').forEach(b => {
@@ -142,6 +159,69 @@ const HTML = `<!DOCTYPE html>
         refresh();
       });
     });
+    // 绑定密钥切换
+    root.querySelectorAll('[data-keys]').forEach(b => {
+      b.addEventListener('click', () => toggleKeys(b.getAttribute('data-keys')));
+    });
+  }
+
+  function renderKeys(wid, kr) {
+    const el = document.getElementById('keys-'+wid);
+    if (!el) return;
+    if (!kr || !kr.ok) {
+      el.innerHTML = '<div class="keys-error">' + escapeHtml((kr && kr.error) || '加载失败') + '</div>';
+      return;
+    }
+    if (!kr.keys.length) {
+      el.innerHTML = '<div class="keys-empty">暂无 API 密钥'
+        + (kr.debug ? ' <span style="font-size:10px;color:#6e7681">(' + escapeHtml(kr.debug) + ')</span>' : '')
+        + '</div>';
+      return;
+    }
+    el.innerHTML = '<table class="keys-table"><thead><tr><th>名称</th><th>前缀</th><th>创建时间</th><th>创建者</th><th>最后使用</th></tr></thead><tbody>'
+      + kr.keys.map(k => '<tr>'
+        + '<td>' + escapeHtml(k.name||'未命名') + '</td>'
+        + '<td><code>' + escapeHtml(k.keyDisplay||'—') + '</code>'
+        + (k.keyFull ? ' <button class="keys-reveal" onclick="var s=this.previousElementSibling;var f=this.nextElementSibling;if(s.style.display==\\'none\\'){s.style.display=\\'inline\\';f.style.display=\\'none\\';this.textContent=\\'隐藏\\'}else{s.style.display=\\'none\\';f.style.display=\\'inline\\';this.textContent=\\'展开\\'}" style="margin-left:4px">展开</button>'
+          + '<span class="keys-full" style="display:none">' + escapeHtml(k.keyFull) + '</span>' : '')
+        + '</td>'
+        + '<td>' + escapeHtml(k.created||'—') + '</td>'
+        + '<td>' + escapeHtml(k.createdBy||'—') + '</td>'
+        + '<td>' + escapeHtml(k.lastUsed||'从未') + '</td>'
+        + '</tr>').join('')
+      + '</tbody></table>';
+  }
+
+  async function toggleKeys(wid) {
+    const el = document.getElementById('keys-'+wid);
+    if (!el) return;
+    // 已经在展示 → 收起
+    if (el.classList.contains('open')) {
+      el.classList.remove('open');
+      return;
+    }
+    // 展开
+    el.classList.add('open');
+    let entry = keysCache[wid];
+    if (!entry) {
+      entry = { loading: false, data: null };
+      keysCache[wid] = entry;
+    }
+    if (entry.data) { renderKeys(wid, entry.data); return; }
+    if (entry.loading) { el.innerHTML = '<div class="keys-empty">加载中…</div>'; return; }
+    entry.loading = true;
+    el.innerHTML = '<div class="keys-empty">加载中…</div>';
+    try {
+      const res = await fetch('/api/keys?workspaceId='+encodeURIComponent(wid));
+      const data = await res.json();
+      entry.data = data;
+      renderKeys(wid, data);
+    } catch (e) {
+      entry.data = { ok: false, error: String(e) };
+      renderKeys(wid, entry.data);
+    } finally {
+      entry.loading = false;
+    }
   }
 
   function showModal(html) {
@@ -292,6 +372,32 @@ export async function startServer(cfg: Config, port: number) {
       } catch (e: any) {
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: e?.message ?? String(e) }));
+      }
+      return;
+    }
+    // API 密钥查询：?workspaceId=wrk_xxx 查单个，?raw=1 返回原始 HTML
+    if (url.pathname === '/api/keys' && req.method === 'GET') {
+      try {
+        const wid = url.searchParams.get('workspaceId');
+        const raw = url.searchParams.get('raw') === '1';
+        if (wid) {
+          const acc = cfg.accounts.find(a => a.workspaceId === wid);
+          if (!acc) {
+            res.writeHead(404, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: '账号不存在' }));
+            return;
+          }
+          const kr = await fetchKeyReport(acc, raw);
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(kr));
+        } else {
+          const reports = await Promise.all(cfg.accounts.map(a => fetchKeyReport(a)));
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(reports));
+        }
+      } catch (e: any) {
+        res.writeHead(500, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: e?.message ?? String(e) }));
       }
       return;
     }

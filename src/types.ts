@@ -41,3 +41,23 @@ export const LIMITS = {
 } as const;
 
 export type TierKey = keyof typeof LIMITS;
+
+// API 密钥
+export interface ApiKey {
+  id: string;            // key_xxx (ULID)
+  name: string;          // 用户给 key 起的名字
+  keyDisplay: string;    // 脱敏前缀显示，如 sk-ScS2...js7J
+  keyFull?: string;      // 完整 key 值（敏感，默认隐藏，点击可展开）
+  created: string;       // 创建时间，从 ULID id 中解码
+  lastUsed?: string;     // 最后使用时间（timeUsed 字段）
+  createdBy?: string;    // 创建者邮箱
+}
+
+// 单账号密钥拉取结果
+export interface KeyReport {
+  ok: boolean;
+  error?: string;
+  name: string;
+  workspaceId: string;
+  keys: ApiKey[];
+}
